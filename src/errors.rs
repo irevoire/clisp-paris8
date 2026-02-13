@@ -1,6 +1,8 @@
 use miette::{Diagnostic, NamedSource, SourceSpan};
 use thiserror::Error;
 
+use crate::{parser::Comments, tokenizer::Lexeme};
+
 #[derive(Debug, Error)]
 #[error("{error}")]
 pub struct Error {
@@ -68,6 +70,7 @@ pub enum ParseError {
     ExpectedExpressionButFoundNothing {
         #[label("Expected expression here")]
         at: SourceSpan,
+        comments: Comments,
     },
     #[error("Expecting closing parenthesis or expression")]
     MissingClosingParen {
@@ -75,5 +78,20 @@ pub enum ParseError {
         matching: SourceSpan,
         #[label("Was expecting closing parens or expression but reached end of file")]
         here: SourceSpan,
+    },
+    #[error("Was expecting {} {:?} but instead got {}",
+        if expecting.len() == 1 { "a" } else { "one of" },
+        expecting,
+        got.to_string_expected(),
+    )]
+    UnexpectedToken {
+        expecting: Vec<String>,
+        got: Lexeme,
+        #[label("Was expecting {} {:?}",
+            if expecting.len() == 1 { "a" } else { "one of" },
+            expecting,
+        )]
+        here: SourceSpan,
+        comments: Comments,
     },
 }

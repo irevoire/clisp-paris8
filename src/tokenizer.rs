@@ -1,3 +1,5 @@
+use std::fmt;
+
 #[derive(Debug, Clone, Copy)]
 pub struct Span {
     pub start: usize,
@@ -26,6 +28,22 @@ pub enum Lexeme {
     WhiteSpace,
     // Set to true if there is multiple consecutive newlines
     NewLine(bool),
+}
+
+impl Lexeme {
+    pub fn to_string_expected(&self) -> String {
+        match self {
+            Lexeme::ParensOpen => String::from("a `(`"),
+            Lexeme::ParensClose => String::from("a `)`"),
+            Lexeme::Dot => String::from("a `.`"),
+            Lexeme::Quote => String::from("a `'`"),
+            Lexeme::String => String::from("a string"),
+            Lexeme::Identifier => String::from("an identifier"),
+            Lexeme::Comment => String::from("a comment"),
+            Lexeme::WhiteSpace => String::from("spaces"),
+            Lexeme::NewLine(_) => String::from("newlines"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -118,13 +136,11 @@ pub fn tokenize(input: &str) -> Vec<Token> {
                     },
                 })
             }
-            _c => {
-                while let Some(c) = input[next..].chars().next() {
-                    if c.is_whitespace() {
-                        break;
-                    } else {
-                        next += c.len_utf8();
-                    }
+            c if c.is_alphabetic() || c == '_' => {
+                while let Some(c) = input[next..].chars().next()
+                    && (c.is_alphanumeric() || c == '_')
+                {
+                    next += c.len_utf8();
                 }
                 output.push(Token {
                     lex: Lexeme::Identifier,

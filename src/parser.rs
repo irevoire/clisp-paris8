@@ -7,7 +7,7 @@ use crate::{
     tokenizer::{Lexeme, Span, Token, tokenize},
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Comments {
     comments: Vec<Comment>,
 }
@@ -61,6 +61,10 @@ pub enum Expression {
         lit: Value,
         ws: Vec<Token>,
     },
+    // The very last comments of a file. Cannot be followed by anything and can only be returned when reaching EoF
+    FinalComments {
+        comments: Comments,
+    },
 }
 
 impl Expression {
@@ -112,6 +116,7 @@ impl Expression {
                 }
                 Ok(())
             }
+            Expression::FinalComments { comments } => comments.display(source, f),
         }
     }
 }
@@ -138,6 +143,15 @@ impl Value {
 impl From<Span> for SourceSpan {
     fn from(span: Span) -> Self {
         (span.start, span.len()).into()
+    }
+}
+
+impl From<SourceSpan> for Span {
+    fn from(span: SourceSpan) -> Self {
+        Span {
+            start: span.offset(),
+            end: span.offset() + span.len(),
+        }
     }
 }
 
@@ -178,11 +192,18 @@ pub fn parse(filename: &str, content: &str) -> Result<ParsedCode, Error> {
     let mut top_level = Vec::new();
 
     while this.tokens.peek().is_some() {
-        let expr = this.parse_expr();
-        top_level.push(expr.map_err(|err| Error {
-            src: src.clone(),
-            error: ErrorKind::ParseError(err),
-        })?);
+        match this.parse_expr() {
+            Ok(expr) => top_level.push(expr),
+            Err(ParseError::ExpectedExpressionButFoundNothing { at: _, comments }) => {
+                top_level.push(Expression::FinalComments { comments });
+            }
+            Err(err) => {
+                return Err(Error {
+                    src: src.clone(),
+                    error: ErrorKind::ParseError(err),
+                });
+            }
+        }
     }
 
     Ok(ParsedCode { src, top_level })
@@ -202,8 +223,6 @@ impl Parser<'_> {
                 span: _,
             }) => {
                 unreachable!();
-                // self.tokens.next();
-                // self.parse_expr()
             }
             Some(Token {
                 lex: Lexeme::Identifier,
@@ -242,10 +261,16 @@ impl Parser<'_> {
                     ws: self.get_whitespaces(),
                 })
             }
-            Some(rcv) => todo!("{:?}", rcv),
+            Some(rcv) => Err(ParseError::UnexpectedToken {
+                expecting: ["(", "'", "\""].iter().map(|s| s.to_string()).collect(),
+                got: rcv.lex,
+                here: rcv.span.into(),
+                comments,
+            }),
             None => Err(ParseError::ExpectedExpressionButFoundNothing {
                 // point to the end of the file
                 at: (self.content.len().saturating_sub(1), 0).into(),
+                comments,
             }),
         }
     }
@@ -274,18 +299,22 @@ impl Parser<'_> {
                 space: None,
             };
 
-            match self.tokens.peek() {
-                // TODO: Handle comments here
-                // Some(Lexeme::()) => break,
-                Some(Token {
-                    lex: Lexeme::WhiteSpace | Lexeme::NewLine(_),
-                    span: _,
-                }) => {
-                    should_break = false;
-                    comment.space = Some(self.tokens.next().unwrap());
-                }
-                Some(_) => (),
-                None => break,
+            if let Some(Token {
+                lex: Lexeme::Comment,
+                span: _,
+            }) = self.tokens.peek()
+            {
+                should_break = false;
+                comment.comment = Some(self.tokens.next().unwrap().span);
+            }
+
+            if let Some(Token {
+                lex: Lexeme::WhiteSpace | Lexeme::NewLine(_),
+                span: _,
+            }) = self.tokens.peek()
+            {
+                should_break = false;
+                comment.space = Some(self.tokens.next().unwrap());
             }
 
             if should_break {
@@ -305,25 +334,35 @@ impl Parser<'_> {
 
         let mut list = Vec::new();
 
-        while let Some(current) = self.tokens.peek()
-            && current.lex != Lexeme::ParensClose
-        {
+        let mut comments_3 = Comments::default();
+        let mut closing_span = None;
+
+        while self.tokens.peek().is_some() {
             match self.parse_expr() {
                 Ok(expr) => list.push(expr),
-                Err(ParseError::ExpectedExpressionButFoundNothing { at }) => {
+                Err(ParseError::ExpectedExpressionButFoundNothing { at, comments: _ }) => {
                     return Err(ParseError::MissingClosingParen {
                         matching: opening.span.into(),
                         here: at,
                     });
                 }
+                Err(ParseError::UnexpectedToken {
+                    expecting: _,
+                    got: Lexeme::ParensClose,
+                    here,
+                    comments,
+                }) => {
+                    comments_3 = comments;
+                    closing_span = Some(here);
+                    self.tokens.next().unwrap();
+                    break;
+                }
                 Err(e) => return Err(e),
             };
-            self.get_comments_and_whitespaces();
+            self.get_whitespaces();
         }
 
-        let comments_3 = self.get_comments_and_whitespaces();
-
-        if self.tokens.peek().is_none() {
+        if closing_span.is_none() {
             return Err(ParseError::MissingClosingParen {
                 matching: opening.span.into(),
                 here: (self.content.len().saturating_sub(1), 0).into(),
@@ -331,16 +370,13 @@ impl Parser<'_> {
             });
         }
 
-        let closing = self.tokens.next().unwrap();
-        assert_eq!(closing.lex, Lexeme::ParensClose);
-
         Ok(Expression::List {
             comments_1,
             opening_span: opening.span,
             comments_2,
             list,
             comments_3,
-            closing_span: closing.span,
+            closing_span: closing_span.unwrap().into(),
             ws: self.get_whitespaces(),
         })
     }
@@ -401,15 +437,47 @@ mod test {
     }
 
     #[test]
+    fn toplevel_final_comment() {
+        assert_snapshot!(parse("kefir", "; hello").unwrap(), @"; hello");
+    }
+
+    #[test]
+    fn simple_comment() {
+        assert_snapshot!(parse("kefir", "(hello;comment\n world )").unwrap(), @r"
+        (hello;comment
+         world )
+        ");
+    }
+
+    #[test]
     fn normal_list() {
-        assert_snapshot!(dbg!(parse("kefir", "(hello 'world )").unwrap()), @"(hello 'world )");
+        assert_snapshot!(parse("kefir", "(hello 'world )").unwrap(), @"(hello 'world )");
+    }
+
+    #[test]
+    fn normal_list_with_newlines_and_comments() {
+        assert_snapshot!(parse("kefir", "; I'm a toplevel comment
+            (; smol comment before the next expression
+                hello
+            'world    
+            ; my world
+            kefir  ; why not comment here
+            )").unwrap(), @r"
+        ; I'm a toplevel comment
+                    (; smol comment before the next expression
+                        hello
+                    'world    
+                    ; my world
+                    kefir  ; why not comment here
+                    )
+        ");
     }
 
     #[test]
     fn normal_list_with_newlines() {
-        assert_snapshot!(dbg!(parse("kefir", "(    hello
+        assert_snapshot!(parse("kefir", "(    hello
             'world    
-            kefir  )").unwrap()), @r"
+            kefir  )").unwrap(), @r"
         (    hello
                     'world    
                     kefir  )
