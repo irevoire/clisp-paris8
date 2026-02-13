@@ -8,6 +8,10 @@ impl Span {
     pub fn len(&self) -> usize {
         self.end - self.start
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -18,6 +22,7 @@ pub enum Lexeme {
     Quote,
     String,
     Identifier,
+    Comment,
     WhiteSpace,
     // Set to true if there is multiple consecutive newlines
     NewLine(bool),
@@ -44,6 +49,23 @@ pub fn tokenize(input: &str) -> Vec<Token> {
         let current = next;
         next += c.len_utf8();
         match c {
+            ';' => {
+                while let Some(c) = input[next..].chars().next()
+                    && c != '\n'
+                {
+                    next += c.len_utf8();
+                }
+                // we might overshoot here if we reached EoF
+                next += '\n'.len_utf8();
+
+                output.push(Token {
+                    lex: Lexeme::Comment,
+                    span: Span {
+                        start: current,
+                        end: next.min(input.len()),
+                    },
+                })
+            }
             '.' | '(' | ')' | '\'' => output.push(Token {
                 lex: match c {
                     '.' => Lexeme::Dot,
@@ -112,6 +134,7 @@ pub fn tokenize(input: &str) -> Vec<Token> {
                     },
                 })
             }
+            c => panic!("Received unexpected character {c}"),
         }
     }
 
@@ -219,6 +242,13 @@ mod test {
                 lex: Identifier,
                 span: Span {
                     start: 7,
+                    end: 12,
+                },
+            },
+            Token {
+                lex: ParensClose,
+                span: Span {
+                    start: 12,
                     end: 13,
                 },
             },
@@ -247,6 +277,68 @@ mod test {
                 lex: String,
                 span: Span {
                     start: 0,
+                    end: 8,
+                },
+            },
+        ]
+        ");
+    }
+
+    #[test]
+    fn test_tokenize_comment() {
+        assert_debug_snapshot!(tokenize("; hello world (I'm an expression)"), @r"
+        [
+            Token {
+                lex: Comment,
+                span: Span {
+                    start: 0,
+                    end: 33,
+                },
+            },
+        ]
+        ");
+
+        assert_debug_snapshot!(tokenize(";\nhello"), @r"
+        [
+            Token {
+                lex: Comment,
+                span: Span {
+                    start: 0,
+                    end: 2,
+                },
+            },
+            Token {
+                lex: Identifier,
+                span: Span {
+                    start: 2,
+                    end: 7,
+                },
+            },
+        ]
+        ");
+
+        assert_debug_snapshot!(tokenize(";\n\nhello"), @r"
+        [
+            Token {
+                lex: Comment,
+                span: Span {
+                    start: 0,
+                    end: 2,
+                },
+            },
+            Token {
+                lex: NewLine(
+                    false,
+                ),
+                span: Span {
+                    start: 2,
+                    end: 3,
+                },
+            },
+            Token {
+                lex: Identifier,
+                span: Span {
+                    start: 3,
                     end: 8,
                 },
             },
