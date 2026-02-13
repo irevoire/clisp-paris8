@@ -58,12 +58,12 @@ pub fn tokenize(input: &str) -> Vec<Token> {
                 },
             }),
             '"' => {
-                while let Some(c) = input[next..].chars().next() {
-                    if c == '"' {
-                        next += c.len_utf8();
-                        break;
-                    }
+                while let Some(c) = input[next..].chars().next()
+                    && c != '"'
+                {
+                    next += c.len_utf8();
                 }
+                next += c.len_utf8();
 
                 output.push(Token {
                     lex: Lexeme::String,
@@ -220,6 +220,34 @@ mod test {
                 span: Span {
                     start: 7,
                     end: 13,
+                },
+            },
+        ]
+        ");
+    }
+
+    #[test]
+    fn test_tokenize_string() {
+        assert_debug_snapshot!(tokenize("\" hello\""), @r"
+        [
+            Token {
+                lex: String,
+                span: Span {
+                    start: 0,
+                    end: 8,
+                },
+            },
+        ]
+        ");
+
+        // TODO: If we're missing the closing quote we should throw an error but that's not the case currently
+        assert_debug_snapshot!(tokenize("\" hello"), @r"
+        [
+            Token {
+                lex: String,
+                span: Span {
+                    start: 0,
+                    end: 8,
                 },
             },
         ]
