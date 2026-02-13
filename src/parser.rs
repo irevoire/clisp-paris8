@@ -7,39 +7,111 @@ use crate::{
     tokenizer::{Lexeme, Span, Token, tokenize},
 };
 
+#[derive(Debug, Clone)]
+pub struct Comments {
+    comments: Vec<Comment>,
+}
+
+impl Comments {
+    pub fn display(&self, source: &str, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for comment in self.comments.iter() {
+            comment.display(source, f)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Comment {
+    comment: Option<Span>,
+    space: Option<Token>,
+}
+
+impl Comment {
+    pub fn display(&self, source: &str, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(comment) = self.comment {
+            write!(f, "{}", &source[comment.start..comment.end])?;
+        }
+        if let Some(Token { lex: _, span }) = self.space {
+            write!(f, "{}", &source[span.start..span.end])?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
 pub enum Expression {
     Ref {
+        comments: Comments,
         span: Span,
         expr: Box<Expression>,
+        ws: Vec<Token>,
     },
     List {
+        comments_1: Comments,
         opening_span: Span,
+        comments_2: Comments,
         list: Vec<Expression>,
+        comments_3: Comments,
         closing_span: Span,
+        ws: Vec<Token>,
     },
-    Literal(Value),
+    Literal {
+        comments: Comments,
+        lit: Value,
+        ws: Vec<Token>,
+    },
 }
 
 impl Expression {
     pub fn display(&self, source: &str, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Expression::Ref { span, expr } => {
+            Expression::Ref {
+                comments,
+                span,
+                expr,
+                ws,
+            } => {
+                comments.display(source, f)?;
                 write!(f, "{}", &source[span.start..span.end])?;
-                expr.display(source, f)
+                expr.display(source, f)?;
+                for ws in ws {
+                    write!(f, "{}", &source[ws.span.start..ws.span.end])?;
+                }
+                Ok(())
             }
             Expression::List {
+                comments_1,
                 opening_span,
+                comments_2,
                 list,
+                comments_3,
                 closing_span,
+                ws,
             } => {
+                comments_1.display(source, f)?;
                 write!(f, "{}", &source[opening_span.start..opening_span.end])?;
+                comments_2.display(source, f)?;
                 for expr in list {
                     expr.display(source, f)?;
                 }
-                write!(f, "{}", &source[closing_span.start..closing_span.end])
+                comments_3.display(source, f)?;
+                write!(f, "{}", &source[closing_span.start..closing_span.end])?;
+                for ws in ws {
+                    write!(f, "{}", &source[ws.span.start..ws.span.end])?;
+                }
+                Ok(())
             }
-            Expression::Literal(value) => value.display(source, f),
+            Expression::Literal { comments, lit, ws } => {
+                comments.display(source, f)?;
+
+                lit.display(source, f)?;
+
+                for ws in ws {
+                    write!(f, "{}", &source[ws.span.start..ws.span.end])?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -118,17 +190,20 @@ pub fn parse(filename: &str, content: &str) -> Result<ParsedCode, Error> {
 
 impl Parser<'_> {
     fn parse_expr(&mut self) -> Result<Expression, ParseError> {
+        let comments = self.get_comments_and_whitespaces();
+
         match self.tokens.peek() {
             Some(Token {
                 lex: Lexeme::ParensOpen,
                 span: _,
-            }) => self.parse_list(),
+            }) => self.parse_list(comments),
             Some(Token {
                 lex: Lexeme::WhiteSpace | Lexeme::NewLine(_),
                 span: _,
             }) => {
-                self.tokens.next();
-                self.parse_expr()
+                unreachable!();
+                // self.tokens.next();
+                // self.parse_expr()
             }
             Some(Token {
                 lex: Lexeme::Identifier,
@@ -136,7 +211,11 @@ impl Parser<'_> {
             }) => {
                 let span = *span;
                 self.tokens.next().unwrap();
-                Ok(Expression::Literal(Value::Ident(span)))
+                Ok(Expression::Literal {
+                    comments,
+                    lit: Value::Ident(span),
+                    ws: self.get_whitespaces(),
+                })
             }
             Some(Token {
                 lex: Lexeme::String,
@@ -144,7 +223,11 @@ impl Parser<'_> {
             }) => {
                 let span = *span;
                 self.tokens.next().unwrap();
-                Ok(Expression::Literal(Value::String(span)))
+                Ok(Expression::Literal {
+                    comments,
+                    lit: Value::String(span),
+                    ws: self.get_whitespaces(),
+                })
             }
             Some(Token {
                 lex: Lexeme::Quote,
@@ -153,8 +236,10 @@ impl Parser<'_> {
                 let span = *span;
                 self.tokens.next().unwrap();
                 Ok(Expression::Ref {
+                    comments,
                     span,
                     expr: Box::new(self.parse_expr()?),
+                    ws: self.get_whitespaces(),
                 })
             }
             Some(rcv) => todo!("{:?}", rcv),
@@ -165,29 +250,64 @@ impl Parser<'_> {
         }
     }
 
-    fn skip_whitespace(&mut self) -> Option<Span> {
-        let tok = self
-            .tokens
-            .peek()
-            .filter(|tok| matches!(tok.lex, Lexeme::WhiteSpace | Lexeme::NewLine(_)))
-            .map(|peek| peek.span);
-        if tok.is_some() {
-            self.tokens.next().unwrap();
+    fn get_whitespaces(&mut self) -> Vec<Token> {
+        let mut comments = Vec::new();
+
+        while let Some(Token {
+            lex: Lexeme::WhiteSpace | Lexeme::NewLine(_),
+            span: _,
+        }) = self.tokens.peek()
+        {
+            comments.push(self.tokens.next().unwrap());
         }
-        tok
+
+        comments
     }
 
-    fn parse_list(&mut self) -> Result<Expression, ParseError> {
+    fn get_comments_and_whitespaces(&mut self) -> Comments {
+        let mut comments = Vec::new();
+
+        loop {
+            let mut should_break = true;
+            let mut comment = Comment {
+                comment: None,
+                space: None,
+            };
+
+            match self.tokens.peek() {
+                // TODO: Handle comments here
+                // Some(Lexeme::()) => break,
+                Some(Token {
+                    lex: Lexeme::WhiteSpace | Lexeme::NewLine(_),
+                    span: _,
+                }) => {
+                    should_break = false;
+                    comment.space = Some(self.tokens.next().unwrap());
+                }
+                Some(_) => (),
+                None => break,
+            }
+
+            if should_break {
+                break;
+            }
+
+            comments.push(comment);
+        }
+
+        Comments { comments }
+    }
+
+    fn parse_list(&mut self, comments_1: Comments) -> Result<Expression, ParseError> {
         let opening = self.tokens.next().unwrap();
         assert_eq!(opening.lex, Lexeme::ParensOpen);
-        self.skip_whitespace();
+        let comments_2 = self.get_comments_and_whitespaces();
 
         let mut list = Vec::new();
 
         while let Some(current) = self.tokens.peek()
             && current.lex != Lexeme::ParensClose
         {
-            dbg!(current.lex);
             match self.parse_expr() {
                 Ok(expr) => list.push(expr),
                 Err(ParseError::ExpectedExpressionButFoundNothing { at }) => {
@@ -198,9 +318,10 @@ impl Parser<'_> {
                 }
                 Err(e) => return Err(e),
             };
-            self.skip_whitespace();
-            println!("parsed {:?}", list.last().unwrap());
+            self.get_comments_and_whitespaces();
         }
+
+        let comments_3 = self.get_comments_and_whitespaces();
 
         if self.tokens.peek().is_none() {
             return Err(ParseError::MissingClosingParen {
@@ -214,9 +335,13 @@ impl Parser<'_> {
         assert_eq!(closing.lex, Lexeme::ParensClose);
 
         Ok(Expression::List {
+            comments_1,
             opening_span: opening.span,
+            comments_2,
             list,
+            comments_3,
             closing_span: closing.span,
+            ws: self.get_whitespaces(),
         })
     }
 }
@@ -277,6 +402,17 @@ mod test {
 
     #[test]
     fn normal_list() {
-        assert_snapshot!(parse("kefir", "(hello 'world )").unwrap(), @"(hello'world)");
+        assert_snapshot!(dbg!(parse("kefir", "(hello 'world )").unwrap()), @"(hello 'world )");
+    }
+
+    #[test]
+    fn normal_list_with_newlines() {
+        assert_snapshot!(dbg!(parse("kefir", "(    hello
+            'world    
+            kefir  )").unwrap()), @r"
+        (    hello
+                    'world    
+                    kefir  )
+        ");
     }
 }
