@@ -249,6 +249,18 @@ impl Parser<'_> {
                 })
             }
             Some(Token {
+                lex: Lexeme::Dot,
+                span,
+            }) => {
+                let span = *span;
+                self.tokens.next().unwrap();
+                Ok(Expression::Literal {
+                    comments,
+                    lit: Value::Dot(span),
+                    ws: self.get_whitespaces(),
+                })
+            }
+            Some(Token {
                 lex: Lexeme::Quote,
                 span,
             }) => {

@@ -1,5 +1,3 @@
-use std::fmt;
-
 #[derive(Debug, Clone, Copy)]
 pub struct Span {
     pub start: usize,
@@ -136,9 +134,9 @@ pub fn tokenize(input: &str) -> Vec<Token> {
                     },
                 })
             }
-            c if c.is_alphabetic() || c == '_' => {
+            _c => {
                 while let Some(c) = input[next..].chars().next()
-                    && (c.is_alphanumeric() || c == '_')
+                    && (!['"', ' ', '(', ')'].contains(&c))
                 {
                     next += c.len_utf8();
                 }
@@ -150,7 +148,6 @@ pub fn tokenize(input: &str) -> Vec<Token> {
                     },
                 })
             }
-            c => panic!("Received unexpected character {c}"),
         }
     }
 
