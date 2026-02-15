@@ -9,7 +9,7 @@ use crate::{
 
 #[derive(Debug, Clone, Default)]
 pub struct Comments {
-    comments: Vec<Comment>,
+    pub comments: Vec<Comment>,
 }
 
 impl Comments {
@@ -23,8 +23,8 @@ impl Comments {
 
 #[derive(Debug, Clone)]
 pub struct Comment {
-    comment: Option<Span>,
-    space: Option<Token>,
+    pub comment: Option<Span>,
+    pub space: Option<Token>,
 }
 
 impl Comment {
@@ -40,12 +40,26 @@ impl Comment {
 }
 
 #[derive(Debug)]
+pub struct Whitespaces {
+    pub ws: Vec<Token>,
+}
+
+impl Whitespaces {
+    pub fn display(&self, source: &str, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for ws in self.ws.iter() {
+            write!(f, "{}", &source[ws.span.start..ws.span.end])?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
 pub enum Expression {
     Ref {
         comments: Comments,
         span: Span,
         expr: Box<Expression>,
-        ws: Vec<Token>,
+        ws: Whitespaces,
     },
     List {
         comments_1: Comments,
@@ -54,12 +68,12 @@ pub enum Expression {
         list: Vec<Expression>,
         comments_3: Comments,
         closing_span: Span,
-        ws: Vec<Token>,
+        ws: Whitespaces,
     },
     Literal {
         comments: Comments,
         lit: Value,
-        ws: Vec<Token>,
+        ws: Whitespaces,
     },
     // The very last comments of a file. Cannot be followed by anything and can only be returned when reaching EoF
     FinalComments {
@@ -79,10 +93,7 @@ impl Expression {
                 comments.display(source, f)?;
                 write!(f, "{}", &source[span.start..span.end])?;
                 expr.display(source, f)?;
-                for ws in ws {
-                    write!(f, "{}", &source[ws.span.start..ws.span.end])?;
-                }
-                Ok(())
+                ws.display(source, f)
             }
             Expression::List {
                 comments_1,
@@ -101,20 +112,12 @@ impl Expression {
                 }
                 comments_3.display(source, f)?;
                 write!(f, "{}", &source[closing_span.start..closing_span.end])?;
-                for ws in ws {
-                    write!(f, "{}", &source[ws.span.start..ws.span.end])?;
-                }
-                Ok(())
+                ws.display(source, f)
             }
             Expression::Literal { comments, lit, ws } => {
                 comments.display(source, f)?;
-
                 lit.display(source, f)?;
-
-                for ws in ws {
-                    write!(f, "{}", &source[ws.span.start..ws.span.end])?;
-                }
-                Ok(())
+                ws.display(source, f)
             }
             Expression::FinalComments { comments } => comments.display(source, f),
         }
@@ -164,8 +167,8 @@ struct Parser<'a> {
 
 #[derive(Debug)]
 pub struct ParsedCode {
-    src: NamedSource<String>,
-    top_level: Vec<Expression>,
+    pub src: NamedSource<String>,
+    pub top_level: Vec<Expression>,
 }
 
 impl fmt::Display for ParsedCode {
@@ -287,18 +290,18 @@ impl Parser<'_> {
         }
     }
 
-    fn get_whitespaces(&mut self) -> Vec<Token> {
-        let mut comments = Vec::new();
+    fn get_whitespaces(&mut self) -> Whitespaces {
+        let mut ws = Vec::new();
 
         while let Some(Token {
             lex: Lexeme::WhiteSpace | Lexeme::NewLine(_),
             span: _,
         }) = self.tokens.peek()
         {
-            comments.push(self.tokens.next().unwrap());
+            ws.push(self.tokens.next().unwrap());
         }
 
-        comments
+        Whitespaces { ws }
     }
 
     fn get_comments_and_whitespaces(&mut self) -> Comments {
