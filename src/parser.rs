@@ -39,7 +39,7 @@ impl Comment {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Whitespaces {
     pub ws: Vec<Token>,
 }
@@ -64,9 +64,8 @@ pub enum Expression {
     List {
         comments_1: Comments,
         opening_span: Span,
-        comments_2: Comments,
         list: Vec<Expression>,
-        comments_3: Comments,
+        comments_2: Comments,
         closing_span: Span,
         ws: Whitespaces,
     },
@@ -98,15 +97,13 @@ impl Expression {
             Expression::List {
                 comments_1,
                 opening_span,
-                comments_2,
                 list,
-                comments_3,
+                comments_2: comments_3,
                 closing_span,
                 ws,
             } => {
                 comments_1.display(source, f)?;
                 write!(f, "{}", &source[opening_span.start..opening_span.end])?;
-                comments_2.display(source, f)?;
                 for expr in list {
                     expr.display(source, f)?;
                 }
@@ -345,7 +342,6 @@ impl Parser<'_> {
     fn parse_list(&mut self, comments_1: Comments) -> Result<Expression, ParseError> {
         let opening = self.tokens.next().unwrap();
         assert_eq!(opening.lex, Lexeme::ParensOpen);
-        let comments_2 = self.get_comments_and_whitespaces();
 
         let mut list = Vec::new();
 
@@ -388,9 +384,8 @@ impl Parser<'_> {
         Ok(Expression::List {
             comments_1,
             opening_span: opening.span,
-            comments_2,
             list,
-            comments_3,
+            comments_2: comments_3,
             closing_span: closing_span.unwrap().into(),
             ws: self.get_whitespaces(),
         })
