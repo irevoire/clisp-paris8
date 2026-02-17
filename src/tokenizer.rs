@@ -136,7 +136,7 @@ pub fn tokenize(input: &str) -> Vec<Token> {
             }
             _c => {
                 while let Some(c) = input[next..].chars().next()
-                    && (!['"', ' ', '(', ')'].contains(&c))
+                    && (!['"', '(', ')'].contains(&c) && !c.is_whitespace())
                 {
                     next += c.len_utf8();
                 }
