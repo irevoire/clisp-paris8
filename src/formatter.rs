@@ -4,18 +4,14 @@ use crate::{
     parser::{Comments, Expression, ParsedCode, Value, Whitespaces},
     tokenizer::{Lexeme, Token},
 };
-use std::{
-    any::Any,
-    borrow::Cow,
-    fmt::{self, Write},
-};
+use std::fmt::Write;
 
 pub fn format(parsed: &ParsedCode) -> String {
     let mut output = String::new();
     let source = parsed.src.inner();
     for expr in parsed.top_level.iter() {
         expr.format(source, 0, false, &mut output).unwrap();
-        match expr.last_ws().is_multiline() {
+        match expr.is_multiline() {
             Multiline::No => (),
             Multiline::Yes => writeln!(output).unwrap(),
             Multiline::Multi => writeln!(output, "\n").unwrap(),
@@ -122,7 +118,6 @@ impl Expression {
                 comments,
                 span: _,
                 expr,
-                ws: _,
             } => comments.is_multiline().or(expr.is_multiline()),
             Expression::List {
                 comments_1,
@@ -130,18 +125,13 @@ impl Expression {
                 list,
                 comments_2: comments_3,
                 closing_span: _,
-                ws: _,
             } => comments_1
                 .is_multiline()
                 .or(list
                     .iter()
                     .fold(Multiline::No, |acc, expr| acc.or(expr.is_multiline())))
                 .or(comments_3.is_multiline()),
-            Expression::Literal {
-                comments,
-                lit: _,
-                ws: _,
-            } => comments.is_multiline(),
+            Expression::Literal { comments, lit: _ } => comments.is_multiline(),
             Expression::FinalComments { comments } => comments.is_multiline(),
         }
     }
@@ -158,7 +148,6 @@ impl Expression {
                 comments,
                 span: _,
                 expr,
-                ws: _,
             } => {
                 comments.format(src, level, skip_next_ws, w)?;
                 write!(w, "{}'", "  ".repeat(level))?;
@@ -171,14 +160,13 @@ impl Expression {
                 list,
                 comments_2,
                 closing_span: _,
-                ws: _,
             } => {
-                let s = ParsedCode {
-                    src: NamedSource::new("kefir", src.to_string()),
-                    top_level: vec![list[0].clone()],
-                }
-                .to_string();
-                println!("{s} is {:?}", self.is_multiline());
+                // let s = ParsedCode {
+                //     src: NamedSource::new("kefir", src.to_string()),
+                //     top_level: vec![list[0].clone()],
+                // }
+                // .to_string();
+                // println!("{s} is {:?}", self.is_multiline());
                 if self.is_multiline() == Multiline::No {
                     // if everything fits on a single line it means there is no comments
                     write!(w, "{}(", "  ".repeat(level))?;
@@ -205,32 +193,13 @@ impl Expression {
 
                 Ok(())
             }
-            Expression::Literal {
-                comments,
-                lit,
-                ws: _,
-            } => {
+            Expression::Literal { comments, lit } => {
                 comments.format(src, level, skip_next_ws, w)?;
                 lit.format(src, level, w)?;
 
                 Ok(())
             }
             Expression::FinalComments { comments } => comments.format(src, level, skip_next_ws, w),
-        }
-    }
-
-    fn last_ws(&self) -> Cow<'_, Whitespaces> {
-        match self {
-            Expression::Ref { ws, .. } => Cow::Borrowed(ws),
-            Expression::List { ws, .. } => Cow::Borrowed(ws),
-            Expression::Literal { ws, .. } => Cow::Borrowed(ws),
-            Expression::FinalComments { comments } => Cow::Owned(Whitespaces {
-                ws: comments
-                    .comments
-                    .iter()
-                    .filter_map(|comment| comment.space)
-                    .collect(),
-            }),
         }
     }
 }
@@ -311,7 +280,8 @@ mod test {
         assert_snapshot!(fmt("(set 'seau '(o o o ))
             (print seau)"), @r"
         (set 'seau '(o o o))
-        (print seau)
+        (  print
+          seau )
         ");
     }
 
@@ -323,19 +293,15 @@ mod test {
           world )
         ");
         assert_snapshot!(fmt("  (  hello  \n  world  )  "), @r"
-        (
-          hello
-          world
-        )
+        (  hello
+
+          world )
         ");
         assert_snapshot!(fmt("(   ( hello) ( \n  ) (world !) )"), @r"
-        (
-          (hello)
+        (  (hello)
           (
-
-          )
-          (world !)
-        )
+         )
+          (world !) )
         ");
     }
 }

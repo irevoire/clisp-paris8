@@ -59,7 +59,6 @@ pub enum Expression {
         comments: Comments,
         span: Span,
         expr: Box<Expression>,
-        ws: Whitespaces,
     },
     List {
         comments_1: Comments,
@@ -67,12 +66,10 @@ pub enum Expression {
         list: Vec<Expression>,
         comments_2: Comments,
         closing_span: Span,
-        ws: Whitespaces,
     },
     Literal {
         comments: Comments,
         lit: Value,
-        ws: Whitespaces,
     },
     // The very last comments of a file. Cannot be followed by anything and can only be returned when reaching EoF
     FinalComments {
@@ -87,12 +84,10 @@ impl Expression {
                 comments,
                 span,
                 expr,
-                ws,
             } => {
                 comments.display(source, f)?;
                 write!(f, "{}", &source[span.start..span.end])?;
-                expr.display(source, f)?;
-                ws.display(source, f)
+                expr.display(source, f)
             }
             Expression::List {
                 comments_1,
@@ -100,7 +95,6 @@ impl Expression {
                 list,
                 comments_2: comments_3,
                 closing_span,
-                ws,
             } => {
                 comments_1.display(source, f)?;
                 write!(f, "{}", &source[opening_span.start..opening_span.end])?;
@@ -108,13 +102,11 @@ impl Expression {
                     expr.display(source, f)?;
                 }
                 comments_3.display(source, f)?;
-                write!(f, "{}", &source[closing_span.start..closing_span.end])?;
-                ws.display(source, f)
+                write!(f, "{}", &source[closing_span.start..closing_span.end])
             }
-            Expression::Literal { comments, lit, ws } => {
+            Expression::Literal { comments, lit } => {
                 comments.display(source, f)?;
-                lit.display(source, f)?;
-                ws.display(source, f)
+                lit.display(source, f)
             }
             Expression::FinalComments { comments } => comments.display(source, f),
         }
@@ -233,7 +225,6 @@ impl Parser<'_> {
                 Ok(Expression::Literal {
                     comments,
                     lit: Value::Ident(span),
-                    ws: self.get_whitespaces(),
                 })
             }
             Some(Token {
@@ -245,7 +236,6 @@ impl Parser<'_> {
                 Ok(Expression::Literal {
                     comments,
                     lit: Value::String(span),
-                    ws: self.get_whitespaces(),
                 })
             }
             Some(Token {
@@ -257,7 +247,6 @@ impl Parser<'_> {
                 Ok(Expression::Literal {
                     comments,
                     lit: Value::Dot(span),
-                    ws: self.get_whitespaces(),
                 })
             }
             Some(Token {
@@ -270,7 +259,6 @@ impl Parser<'_> {
                     comments,
                     span,
                     expr: Box::new(self.parse_expr()?),
-                    ws: self.get_whitespaces(),
                 })
             }
             Some(rcv) => Err(ParseError::UnexpectedToken {
@@ -285,20 +273,6 @@ impl Parser<'_> {
                 comments,
             }),
         }
-    }
-
-    fn get_whitespaces(&mut self) -> Whitespaces {
-        let mut ws = Vec::new();
-
-        while let Some(Token {
-            lex: Lexeme::WhiteSpace | Lexeme::NewLine(_),
-            span: _,
-        }) = self.tokens.peek()
-        {
-            ws.push(self.tokens.next().unwrap());
-        }
-
-        Whitespaces { ws }
     }
 
     fn get_comments_and_whitespaces(&mut self) -> Comments {
@@ -370,7 +344,6 @@ impl Parser<'_> {
                 }
                 Err(e) => return Err(e),
             };
-            self.get_whitespaces();
         }
 
         if closing_span.is_none() {
@@ -387,7 +360,6 @@ impl Parser<'_> {
             list,
             comments_2: comments_3,
             closing_span: closing_span.unwrap().into(),
-            ws: self.get_whitespaces(),
         })
     }
 }
