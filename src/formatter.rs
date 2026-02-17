@@ -1,8 +1,14 @@
+use miette::NamedSource;
+
 use crate::{
     parser::{Comments, Expression, ParsedCode, Value, Whitespaces},
     tokenizer::{Lexeme, Token},
 };
-use std::{borrow::Cow, fmt::Write};
+use std::{
+    any::Any,
+    borrow::Cow,
+    fmt::{self, Write},
+};
 
 pub fn format(parsed: &ParsedCode) -> String {
     let mut output = String::new();
@@ -167,6 +173,12 @@ impl Expression {
                 closing_span: _,
                 ws: _,
             } => {
+                let s = ParsedCode {
+                    src: NamedSource::new("kefir", src.to_string()),
+                    top_level: vec![list[0].clone()],
+                }
+                .to_string();
+                println!("{s} is {:?}", self.is_multiline());
                 if self.is_multiline() == Multiline::No {
                     // if everything fits on a single line it means there is no comments
                     write!(w, "{}(", "  ".repeat(level))?;
@@ -180,13 +192,15 @@ impl Expression {
                     write!(w, ")")?;
                 } else {
                     comments_1.format(src, level + 1, skip_next_ws, w)?;
-                    writeln!(w, "{}(", "  ".repeat(level))?;
-                    for expr in list.iter() {
-                        expr.format(src, level + 1, skip_next_ws, w)?;
-                        writeln!(w)?;
+                    write!(w, "{}(", "  ".repeat(level))?;
+                    for (i, expr) in list.iter().enumerate() {
+                        expr.format(src, level + 1, true, w)?;
+                        if i != list.len() - 1 {
+                            writeln!(w)?;
+                        }
                     }
-                    comments_2.format(src, level + 1, skip_next_ws, w)?;
-                    write!(w, "{})", "  ".repeat(level))?;
+                    comments_2.format(src, level + 1, true, w)?;
+                    write!(w, " )")?;
                 }
 
                 Ok(())
@@ -305,10 +319,8 @@ mod test {
     fn test_format_multi_line_list() {
         assert_snapshot!(fmt("(\nhello world)"), @r"
         (
-
           hello
-          world
-        )
+          world )
         ");
         assert_snapshot!(fmt("  (  hello  \n  world  )  "), @r"
         (

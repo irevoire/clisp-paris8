@@ -53,7 +53,7 @@ impl Whitespaces {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Expression {
     Ref {
         comments: Comments,
@@ -121,7 +121,7 @@ impl Expression {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Value {
     Ident(Span),
     String(Span),
