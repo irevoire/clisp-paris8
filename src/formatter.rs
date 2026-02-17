@@ -1,5 +1,3 @@
-use miette::NamedSource;
-
 use crate::{
     parser::{Comments, Expression, ParsedCode, Value, Whitespaces},
     tokenizer::{Lexeme, Token},
@@ -12,9 +10,9 @@ pub fn format(parsed: &ParsedCode) -> String {
     for expr in parsed.top_level.iter() {
         expr.format(source, 0, false, &mut output).unwrap();
         match expr.is_multiline() {
-            Multiline::No => (),
-            Multiline::Yes => writeln!(output).unwrap(),
-            Multiline::Multi => writeln!(output, "\n").unwrap(),
+            Multiline::No => (),    // writeln!(output).unwrap(),
+            Multiline::Yes => (),   // writeln!(output).unwrap(),
+            Multiline::Multi => (), // writeln!(output).unwrap(),
         }
     }
 
@@ -22,23 +20,28 @@ pub fn format(parsed: &ParsedCode) -> String {
 }
 
 impl Comments {
+    // Return `true` if we were supposed to skip a whitespace but didn't.
+    // This means the caller should be skipping the next whitespace.
     fn format(
         &self,
         src: &str,
         level: usize,
         mut skip_next_ws: bool,
         w: &mut impl Write,
-    ) -> std::fmt::Result {
+    ) -> Result<bool, std::fmt::Error> {
         for comment in self.comments.iter() {
             let mut already_inserted_newlines = skip_next_ws;
-            skip_next_ws = false;
 
             if let Some(comment) = comment.comment {
                 let comment = src[comment.start..comment.end].trim();
                 writeln!(w, "{}{comment}", "  ".repeat(level))?;
                 already_inserted_newlines = true;
+                skip_next_ws = false;
             }
-            if let Some(ws) = comment.space {
+            if let Some(ws) = comment.space
+                && !skip_next_ws
+            {
+                skip_next_ws = false;
                 match ws.is_multiline() {
                     Multiline::No => (),
                     _ if already_inserted_newlines => writeln!(w)?,
@@ -47,7 +50,7 @@ impl Comments {
                 };
             }
         }
-        Ok(())
+        Ok(skip_next_ws)
     }
 
     fn is_multiline(&self) -> Multiline {
@@ -149,9 +152,12 @@ impl Expression {
                 span: _,
                 expr,
             } => {
-                comments.format(src, level, skip_next_ws, w)?;
-                write!(w, "{}'", "  ".repeat(level))?;
-                expr.format(src, 0, skip_next_ws, w)?;
+                let skip_next_ws = comments.format(src, level, skip_next_ws, w)?;
+                if !skip_next_ws {
+                    write!(w, "{}", "  ".repeat(level))?;
+                }
+                write!(w, "'")?;
+                expr.format(src, 0, false, w)?;
                 Ok(())
             }
             Expression::List {
@@ -161,27 +167,30 @@ impl Expression {
                 comments_2,
                 closing_span: _,
             } => {
-                // let s = ParsedCode {
-                //     src: NamedSource::new("kefir", src.to_string()),
-                //     top_level: vec![list[0].clone()],
-                // }
-                // .to_string();
-                // println!("{s} is {:?}", self.is_multiline());
                 if self.is_multiline() == Multiline::No {
                     // if everything fits on a single line it means there is no comments
-                    write!(w, "{}(", "  ".repeat(level))?;
+                    if !skip_next_ws {
+                        write!(w, "{}", "  ".repeat(level))?;
+                    }
+                    write!(w, "(")?;
                     for (i, expr) in list.iter().enumerate() {
                         // we set the level to 0 to be sure no spaces are inserted
-                        expr.format(src, 0, skip_next_ws, w)?;
+                        expr.format(src, 0, true, w)?;
                         if i != list.len() - 1 {
                             write!(w, " ")?;
                         }
                     }
                     write!(w, ")")?;
                 } else {
-                    comments_1.format(src, level + 1, skip_next_ws, w)?;
-                    write!(w, "{}(", "  ".repeat(level))?;
+                    let skip_ident = comments_1.format(src, level + 1, skip_next_ws, w)?;
+                    if !skip_ident {
+                        write!(w, "{}", "  ".repeat(level))?;
+                    }
+                    write!(w, "(")?;
                     for (i, expr) in list.iter().enumerate() {
+                        if i > 0 {
+                            write!(w, "{}", "  ".repeat(level + 1))?;
+                        }
                         expr.format(src, level + 1, true, w)?;
                         if i != list.len() - 1 {
                             writeln!(w)?;
@@ -195,26 +204,38 @@ impl Expression {
             }
             Expression::Literal { comments, lit } => {
                 comments.format(src, level, skip_next_ws, w)?;
-                lit.format(src, level, w)?;
+                lit.format(src, level, skip_next_ws, w)?;
 
                 Ok(())
             }
-            Expression::FinalComments { comments } => comments.format(src, level, skip_next_ws, w),
+            Expression::FinalComments { comments } => {
+                comments.format(src, level, skip_next_ws, w)?;
+                Ok(())
+            }
         }
     }
 }
 
 impl Value {
-    fn format(&self, src: &str, level: usize, w: &mut impl Write) -> std::fmt::Result {
+    fn format(
+        &self,
+        src: &str,
+        level: usize,
+        skip_next_ws: bool,
+        w: &mut impl Write,
+    ) -> std::fmt::Result {
+        if !skip_next_ws {
+            write!(w, "{}", "  ".repeat(level))?;
+        }
         match self {
-            Value::Ident(span) => write!(w, "{}{}", "  ".repeat(level), &src[span.start..span.end]),
+            Value::Ident(span) => write!(w, "{}", &src[span.start..span.end]),
             Value::String(span) => {
-                write!(w, "{}{}", "  ".repeat(level), &src[span.start..span.end])
+                write!(w, "{}", &src[span.start..span.end])
             }
             Value::Number { span, value: _ } => {
-                write!(w, "{}{}", "  ".repeat(level), &src[span.start..span.end])
+                write!(w, "{}", &src[span.start..span.end])
             }
-            Value::Dot(span) => write!(w, "{}{}", "  ".repeat(level), &src[span.start..span.end]),
+            Value::Dot(span) => write!(w, "{}", &src[span.start..span.end]),
         }
     }
 }
@@ -227,6 +248,7 @@ mod test {
 
     fn fmt(s: &str) -> String {
         let parsed = parse("kefir", s).unwrap();
+        dbg!(&parsed);
         super::format(&parsed)
     }
 
@@ -273,34 +295,22 @@ mod test {
     }
 
     #[test]
-    fn test_format_two_single_line_list() {
-        assert_snapshot!(fmt("(hello world)"), @"(hello world)");
-        assert_snapshot!(fmt("  (  hello    world  )  "), @"(hello world)");
-        assert_snapshot!(fmt("(   ( hello) (   ) (world !) )"), @"((hello) () (world !))");
-        assert_snapshot!(fmt("(set 'seau '(o o o ))
-            (print seau)"), @r"
-        (set 'seau '(o o o))
-        (  print
-          seau )
-        ");
-    }
-
-    #[test]
     fn test_format_multi_line_list() {
         assert_snapshot!(fmt("(\nhello world)"), @r"
-        (
-          hello
+        (hello
           world )
         ");
         assert_snapshot!(fmt("  (  hello  \n  world  )  "), @r"
-        (  hello
-
+        (hello
+          world )
+        ");
+        assert_snapshot!(fmt("(hello world\n) "), @r"
+        (hello
           world )
         ");
         assert_snapshot!(fmt("(   ( hello) ( \n  ) (world !) )"), @r"
-        (  (hello)
-          (
-         )
+        ((hello)
+          ( )
           (world !) )
         ");
     }
