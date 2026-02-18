@@ -54,7 +54,14 @@ impl Comments {
 
             if let Some(comment) = comment.comment {
                 let comment = src[comment.start..comment.end].trim();
-                writeln!(w, "{}{comment}", "  ".repeat(level))?;
+                if !skip_next_ws {
+                    write!(w, "{}", " ".repeat((level * 2).saturating_sub(1)))?;
+                }
+                // if we're indented / after something, we should insert a space before the comment
+                if level > 0 {
+                    // write!(w, " ")?;
+                }
+                writeln!(w, "{comment}")?;
                 already_inserted_newlines = true;
                 skip_next_ws = false;
             }
@@ -389,6 +396,7 @@ mod test {
 (setq noooombre (nombres 12 noooombre))
 (print noooombre)
 "), @r"
+
         (setq noooombre '(1 15 3 5 24 2 35 5))
         (setq noooombre (nombres 12 noooombre))
         (print noooombre)
@@ -401,6 +409,7 @@ mod test {
     ((nombres element (cdr liste))) ) )
 
 "), @r"
+
         (defun
           nombres
           (element liste)
@@ -412,7 +421,7 @@ mod test {
     }
 
     #[test]
-    fn test_format_multi_line_list_with_spaces() {
+    fn test_format_top_level_with_spaces() {
         assert_snapshot!(fmt("
 (setq atooome (atomes  '(a (b (c) (d)) (e f) (g (h)) nil)))
 (print atooome)
@@ -420,11 +429,66 @@ mod test {
 (setq atoooome (atomes '(a . d)))
 (print atoooome)
 "), @r"
+
         (setq atooome (atomes '(a (b (c) (d)) (e f) (g (h)) nil)))
         (print atooome)
 
         (setq atoooome (atomes '(a . d)))
         (print atoooome)
+        ");
+    }
+
+    #[test]
+    fn test_format_with_comments() {
+        assert_snapshot!(fmt("
+(defun nombre (liste)
+    (cond
+        ((not liste) 0)
+        ((cond
+            ( ; case
+                (listp (car liste)) ; condition
+                (cond
+                    ( ;case
+                        (numberp(car (car liste))) ; condition
+                        (+ 1 (nombre (cdr liste))); result
+
+                )
+                    ((nombre (cdr liste)))
+                ) ; result
+            )
+            ((nombre (cdr liste)))
+        ((nombre (cdr liste))) ) ) ) )
+
+(print (nombre '((2 d b) c (d) (4 f) (e g x) f)))
+"), @r"
+
+        (defun
+          nombre
+          (liste)
+          (cond
+            ((not liste) 0)
+            ((cond
+                (; case
+                  (listp
+                    (car liste) )
+                  ; condition
+                  (cond
+                    (;case
+                      (numberp
+                        (car (car liste)) )
+                      ; condition
+                      (+
+                        1
+                        (nombre (cdr liste)) ); result
+
+         )
+                    ((nombre (cdr liste))) ); result
+         )
+                ((nombre (cdr liste)))
+                ((nombre (cdr liste))) ) ) ) )
+
+
+        (print (nombre '((2 d b) c (d) (4 f) (e g x) f)))
         ");
     }
 }
