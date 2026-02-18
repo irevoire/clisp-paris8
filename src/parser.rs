@@ -19,6 +19,12 @@ impl Comments {
         }
         Ok(())
     }
+
+    pub fn contains_comments(&self) -> bool {
+        self.comments
+            .iter()
+            .any(|comment| comment.comment.is_some())
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -8,11 +8,11 @@ pub fn format(parsed: &ParsedCode) -> String {
     let mut output = String::new();
     let source = parsed.src.inner();
     for expr in parsed.top_level.iter() {
-        expr.format(source, 0, false, &mut output).unwrap();
-        match expr.is_multiline() {
-            Multiline::No => (),    // writeln!(output).unwrap(),
-            Multiline::Yes => (),   // writeln!(output).unwrap(),
-            Multiline::Multi => (), // writeln!(output).unwrap(),
+        expr.format(source, 0, true, &mut output).unwrap();
+        match expr.is_multiline(true) {
+            Multiline::No => writeln!(output).unwrap(),
+            Multiline::Yes => writeln!(output).unwrap(),
+            Multiline::Multi => writeln!(output, "\n").unwrap(),
         }
     }
 
@@ -41,8 +41,7 @@ impl Comments {
             if let Some(ws) = comment.space
                 && !skip_next_ws
             {
-                skip_next_ws = false;
-                match ws.is_multiline() {
+                match ws.is_multiline(skip_next_ws) {
                     Multiline::No => (),
                     _ if already_inserted_newlines => writeln!(w)?,
                     Multiline::Yes => writeln!(w)?,
@@ -53,15 +52,20 @@ impl Comments {
         Ok(skip_next_ws)
     }
 
-    fn is_multiline(&self) -> Multiline {
+    fn is_multiline(&self, mut skip_next_ws: bool) -> Multiline {
         let mut ret = Multiline::No;
         for comment in self.comments.iter() {
             if let Some(_comment) = comment.comment {
                 // A comment inevitably ends with a newlines
                 ret = Multiline::Yes;
+                skip_next_ws = false;
             }
             if let Some(ws) = comment.space {
-                ret = ret.or(ws.is_multiline());
+                if skip_next_ws {
+                    skip_next_ws = false;
+                } else {
+                    ret = ret.or(ws.is_multiline(skip_next_ws));
+                }
             }
         }
         ret
@@ -69,8 +73,9 @@ impl Comments {
 }
 
 impl Token {
-    fn is_multiline(&self) -> Multiline {
+    fn is_multiline(&self, skip_next_ws: bool) -> Multiline {
         match self.lex {
+            _ if skip_next_ws => Multiline::No,
             Lexeme::NewLine(false) => Multiline::Yes,
             Lexeme::NewLine(true) => Multiline::Multi,
             _ => Multiline::No,
@@ -115,13 +120,15 @@ impl Whitespaces {
 }
 
 impl Expression {
-    fn is_multiline(&self) -> Multiline {
+    fn is_multiline(&self, skip_next_ws: bool) -> Multiline {
         match self {
             Expression::Ref {
                 comments,
                 span: _,
                 expr,
-            } => comments.is_multiline().or(expr.is_multiline()),
+            } => comments
+                .is_multiline(skip_next_ws)
+                .or(expr.is_multiline(false)),
             Expression::List {
                 comments_1,
                 opening_span: _,
@@ -129,13 +136,38 @@ impl Expression {
                 comments_2: comments_3,
                 closing_span: _,
             } => comments_1
-                .is_multiline()
+                .is_multiline(skip_next_ws)
                 .or(list
                     .iter()
-                    .fold(Multiline::No, |acc, expr| acc.or(expr.is_multiline())))
-                .or(comments_3.is_multiline()),
-            Expression::Literal { comments, lit: _ } => comments.is_multiline(),
-            Expression::FinalComments { comments } => comments.is_multiline(),
+                    .fold(Multiline::No, |acc, expr| acc.or(expr.is_multiline(false))))
+                .or(comments_3.is_multiline(false)),
+            Expression::Literal { comments, lit: _ } => comments.is_multiline(skip_next_ws),
+            Expression::FinalComments { comments } => comments.is_multiline(skip_next_ws),
+        }
+    }
+
+    fn contains_comments(&self) -> bool {
+        match self {
+            Expression::Ref {
+                comments,
+                span: _,
+                expr,
+            } => comments.contains_comments() | expr.contains_comments(),
+            Expression::List {
+                comments_1,
+                opening_span: _,
+                list,
+                comments_2: comments_3,
+                closing_span: _,
+            } => {
+                comments_1.contains_comments()
+                    | list
+                        .iter()
+                        .fold(false, |acc, expr| acc | expr.contains_comments())
+                    | comments_3.contains_comments()
+            }
+            Expression::Literal { comments, lit: _ } => comments.contains_comments(),
+            Expression::FinalComments { comments } => comments.contains_comments(),
         }
     }
 
@@ -167,7 +199,7 @@ impl Expression {
                 comments_2,
                 closing_span: _,
             } => {
-                if self.is_multiline() == Multiline::No {
+                if self.is_multiline(skip_next_ws) == Multiline::No {
                     // if everything fits on a single line it means there is no comments
                     if !skip_next_ws {
                         write!(w, "{}", "  ".repeat(level))?;
@@ -312,6 +344,31 @@ mod test {
         ((hello)
           ( )
           (world !) )
+        ");
+        assert_snapshot!(fmt("
+(setq noooombre '(1 15 3 5 24 2 35 5))
+(setq noooombre (nombres 12 noooombre))
+(print noooombre)
+"), @r"
+        (setq noooombre '(1 15 3 5 24 2 35 5))
+        (setq noooombre (nombres 12 noooombre))
+        (print noooombre)
+        ");
+        assert_snapshot!(fmt("
+(defun nombres (element liste)
+  (cond
+    ((not liste) nil)
+    ((<= element (car liste)) (rplacd liste (nombres element (cdr liste))))
+    ((nombres element (cdr liste))) ) )
+
+"), @r"
+        (defun
+          nombres
+          (element liste)
+          (cond
+            ((not liste) nil)
+            ((<= element (car liste)) (rplacd liste (nombres element (cdr liste))))
+            ((nombres element (cdr liste))) ) )
         ");
     }
 }
