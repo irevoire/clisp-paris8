@@ -8,11 +8,16 @@ pub fn format(parsed: &ParsedCode) -> String {
     let mut output = String::new();
     let source = parsed.src.inner();
     for expr in parsed.top_level.iter() {
-        expr.format(source, 0, true, &mut output).unwrap();
-        match expr.is_multiline(true) {
-            Multiline::No => writeln!(output).unwrap(),
+        match expr.starts_by_ws() {
+            Multiline::No => (),
             Multiline::Yes => writeln!(output).unwrap(),
             Multiline::Multi => writeln!(output, "\n").unwrap(),
+        }
+        expr.format(source, 0, true, &mut output).unwrap();
+        match expr.is_multiline(true) {
+            Multiline::No => (),
+            Multiline::Yes | Multiline::Multi => writeln!(output).unwrap(),
+            // Multiline::Multi => writeln!(output, "\n").unwrap(),
         }
     }
 
@@ -20,6 +25,21 @@ pub fn format(parsed: &ParsedCode) -> String {
 }
 
 impl Comments {
+    fn starts_by_ws(&self) -> Multiline {
+        if let Some(comment) = self.comments.first() {
+            if comment.comment.is_some() {
+                Multiline::No
+            } else if let Some(ws) = comment.space {
+                ws.is_multiline(false)
+            } else {
+                // this makes no sense and should never happens
+                Multiline::No
+            }
+        } else {
+            Multiline::No
+        }
+    }
+
     // Return `true` if we were supposed to skip a whitespace but didn't.
     // This means the caller should be skipping the next whitespace.
     fn format(
@@ -120,6 +140,25 @@ impl Whitespaces {
 }
 
 impl Expression {
+    fn starts_by_ws(&self) -> Multiline {
+        match self {
+            Expression::Ref {
+                comments,
+                span: _,
+                expr: _,
+            } => comments.starts_by_ws(),
+            Expression::List {
+                comments_1,
+                opening_span: _,
+                list: _,
+                comments_2: _,
+                closing_span: _,
+            } => comments_1.starts_by_ws(),
+            Expression::Literal { comments, lit: _ } => comments.starts_by_ws(),
+            Expression::FinalComments { comments } => comments.starts_by_ws(),
+        }
+    }
+
     fn is_multiline(&self, skip_next_ws: bool) -> Multiline {
         match self {
             Expression::Ref {
@@ -369,6 +408,23 @@ mod test {
             ((not liste) nil)
             ((<= element (car liste)) (rplacd liste (nombres element (cdr liste))))
             ((nombres element (cdr liste))) ) )
+        ");
+    }
+
+    #[test]
+    fn test_format_multi_line_list_with_spaces() {
+        assert_snapshot!(fmt("
+(setq atooome (atomes  '(a (b (c) (d)) (e f) (g (h)) nil)))
+(print atooome)
+
+(setq atoooome (atomes '(a . d)))
+(print atoooome)
+"), @r"
+        (setq atooome (atomes '(a (b (c) (d)) (e f) (g (h)) nil)))
+        (print atooome)
+
+        (setq atoooome (atomes '(a . d)))
+        (print atoooome)
         ");
     }
 }
